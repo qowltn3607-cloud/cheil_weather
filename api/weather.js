@@ -50,6 +50,7 @@ export default async function handler(req, res) {
 
     // 미세먼지 파싱 — 실패시 인근 측정소로 순차 시도
     let dust = null;
+    const dustDebug = [];
     if (airKey) {
       const stations = ['이태원동', '한강대로', '중구'];
       for (const station of stations) {
@@ -60,12 +61,18 @@ export default async function handler(req, res) {
           const r = await fetch(url);
           const d = await r.json();
           const item = d?.response?.body?.items?.[0];
+          const resultCode = d?.response?.header?.resultCode;
+          dustDebug.push({ station, resultCode, pm25: item?.pm25Value ?? 'no item' });
           if (item?.pm25Value && item.pm25Value !== '-') {
             dust = parseFloat(item.pm25Value);
             break;
           }
-        } catch { /* 다음 측정소 시도 */ }
+        } catch (e) {
+          dustDebug.push({ station, error: e.message });
+        }
       }
+    } else {
+      dustDebug.push({ error: 'AIR_API_KEY 환경변수 없음' });
     }
 
     return res.status(200).json({
@@ -75,6 +82,7 @@ export default async function handler(req, res) {
       rainfall: parsed['RN1'] ?? '0',
       pty:      parsed['PTY'] ?? '0',
       dust,
+      dustDebug,
       baseDate,
       baseTime,
     });
