@@ -1,0 +1,82 @@
+// api/weather.js — Vercel 서버리스 함수
+// 기상청 API 키: KMA_API_KEY
+// 에어코리아 API 키: AIR_API_KEY (공공데이터포털 - 한국환경공단 에어코리아)
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const kmaKey = process.env.KMA_API_KEY;
+  const airKey = process.env.AIR_API_KEY;
+
+  if (!kmaKey) return res.status(500).json({ error: 'API 키가 설정되지 않았습니다.' });
+
+  // 한국 시간(KST)
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const yyyy = kst.getUTCFullYear();
+  const mm   = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(kst.getUTCDate()).padStart(2, '0');
+  const baseDate = `${yyyy}${mm}${dd}`;
+  let h = kst.getUTCHours();
+  const min = kst.getUTCMinutes();
+  if (min < 40) h = h === 0 ? 23 : h - 1;
+  const baseTime = `${String(h).padStart(2, '0')}00`;
+
+  const NX = 60, NY = 126;
+
+  // ① 기상청 초단기실황
+  const kmaUrl = `https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtNcst`
+    + `?pageNo=1&numOfRows=1000&dataType=JSON`
+    + `&base_date=${baseDate}&base_time=${baseTime}`
+    + `&nx=${NX}&ny=${NY}&authKey=${kmaKey}`;
+
+  // ② 에어코리아 PM2.5 (이태원 인근 — 용산구 측정소)
+  const airUrl = airKey
+    ? `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty`
+      + `?stationName=${encodeURIComponent('용산')}&dataTerm=DAILY&pageNo=1&numOfRows=1`
+      + `&returnType=json&serviceKey=${airKey}&ver=1.0`
+    : null;
+
+  try {
+    // 병렬 호출
+    const [kmaRes, airRes] = await Promise.all([
+      fetch(kmaUrl),
+      airUrl ? fetch(airUrl) : Promise.resolve(null),
+    ]);
+
+    const kmaData = await kmaRes.json();
+    const items = kmaData?.response?.body?.items?.item;
+    if (!items) return res.status(502).json({ error: '기상청 데이터를 받아오지 못했습니다.' });
+
+    const parsed = {};
+    items.forEach(item => { parsed[item.category] = item.obsrValue; });
+
+    // 미세먼지 파싱
+    let dust = null;
+    if (airRes) {
+      try {
+        const airData = await airRes.json();
+        const airItem = airData?.response?.body?.items?.[0];
+        if (airItem?.pm25Value && airItem.pm25Value !== '-') {
+          dust = parseFloat(airItem.pm25Value);
+        }
+      } catch { /* 에어코리아 실패시 null 유지 */ }
+    }
+
+    return res.status(200).json({
+      temp:     parsed['T1H'] ?? null,
+      humidity: parsed['REH'] ?? null,
+      wind:     parsed['WSD'] ?? null,
+      rainfall: parsed['RN1'] ?? '0',
+      pty:      parsed['PTY'] ?? '0',
+      dust,
+      baseDate,
+      baseTime,
+    });
+
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
