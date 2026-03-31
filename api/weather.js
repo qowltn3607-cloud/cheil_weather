@@ -32,20 +32,15 @@ export default async function handler(req, res) {
     + `&base_date=${baseDate}&base_time=${baseTime}`
     + `&nx=${NX}&ny=${NY}&authKey=${kmaKey}`;
 
-  // ② 에어코리아 PM2.5 (이태원 인근 — 용산구 측정소)
+  // ② 에어코리아 PM2.5 — 용산구 측정소 (이태원동)
   const airUrl = airKey
     ? `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty`
-      + `?stationName=${encodeURIComponent('용산')}&dataTerm=DAILY&pageNo=1&numOfRows=1`
+      + `?stationName=${encodeURIComponent('이태원동')}&dataTerm=DAILY&pageNo=1&numOfRows=1`
       + `&returnType=json&serviceKey=${airKey}&ver=1.0`
     : null;
 
   try {
-    // 병렬 호출
-    const [kmaRes, airRes] = await Promise.all([
-      fetch(kmaUrl),
-      airUrl ? fetch(airUrl) : Promise.resolve(null),
-    ]);
-
+    const kmaRes = await fetch(kmaUrl);
     const kmaData = await kmaRes.json();
     const items = kmaData?.response?.body?.items?.item;
     if (!items) return res.status(502).json({ error: '기상청 데이터를 받아오지 못했습니다.' });
@@ -53,16 +48,24 @@ export default async function handler(req, res) {
     const parsed = {};
     items.forEach(item => { parsed[item.category] = item.obsrValue; });
 
-    // 미세먼지 파싱
+    // 미세먼지 파싱 — 실패시 인근 측정소로 순차 시도
     let dust = null;
-    if (airRes) {
-      try {
-        const airData = await airRes.json();
-        const airItem = airData?.response?.body?.items?.[0];
-        if (airItem?.pm25Value && airItem.pm25Value !== '-') {
-          dust = parseFloat(airItem.pm25Value);
-        }
-      } catch { /* 에어코리아 실패시 null 유지 */ }
+    if (airKey) {
+      const stations = ['이태원동', '한강대로', '중구'];
+      for (const station of stations) {
+        try {
+          const url = `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty`
+            + `?stationName=${encodeURIComponent(station)}&dataTerm=DAILY&pageNo=1&numOfRows=1`
+            + `&returnType=json&serviceKey=${airKey}&ver=1.0`;
+          const r = await fetch(url);
+          const d = await r.json();
+          const item = d?.response?.body?.items?.[0];
+          if (item?.pm25Value && item.pm25Value !== '-') {
+            dust = parseFloat(item.pm25Value);
+            break;
+          }
+        } catch { /* 다음 측정소 시도 */ }
+      }
     }
 
     return res.status(200).json({
