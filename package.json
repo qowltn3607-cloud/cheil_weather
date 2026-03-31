@@ -1,9 +1,0 @@
-{
-  "name": "cheil-weather",
-  "version": "1.0.0",
-  "description": "제일기획 이태원 날씨 시각화 사이트",
-  "type": "module",
-  "scripts": {
-    "dev": "vercel dev"
-  }
-}
