@@ -57,8 +57,7 @@ export default async function handler(req, res) {
         try {
           const url = `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty`
             + `?stationName=${encodeURIComponent(station)}&dataTerm=DAILY&pageNo=1&numOfRows=1`
-            + `&returnType=json&serviceKey=${airKey}&ver=1.0`;
-          const r = await fetch(url);
+            + `&returnType=json&serviceKey=${airKey}&ver=1.0`;          const r = await fetch(url);
           const d = await r.json();
           const item = d?.response?.body?.items?.[0];
           const resultCode = d?.response?.header?.resultCode;
